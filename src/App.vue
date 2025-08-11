@@ -1,40 +1,42 @@
 <template>
   <div>
-    <button v-if="!loading" @click="toggleLanguage">
-      {{ language === 'en' ? 'EN' : 'FR' }}
-    </button>
-
-    <div v-if="loading" class="loading-screen">
-      <p>Loading audio assets...</p>
+    <div v-if="isLoading" class="loading-screen">
+      Loading audio, please wait...
     </div>
 
-    <div v-else class="starry-sky">
-      <div v-for="(star, i) in backgroundStars" :key="'bg-star-' + i" class="title-star" :style="{
-        top: star.top + '%',
-        left: star.left + '%',
-        width: star.size + 'px',
-        height: star.size + 'px',
-        background: star.color,
-        animationDelay: star.animationDelay
-      }" />
-    </div>
+    <div v-else>
+      <button @click="toggleLanguage">
+        {{ language === 'en' ? 'EN' : 'FR' }}
+      </button>
 
-    <main v-if="!loading" class="container">
-      <div class="grid">
-        <TravelerCard v-for="(instrument, index) in instruments" :key="instrument.name_en" :instrument="instrument"
-          :language="language" :onToggle="() => toggleInstrument(index)" />
+      <div class="starry-sky">
+        <div v-for="(star, i) in backgroundStars" :key="'bg-star-' + i" class="title-star" :style="{
+          top: star.top + '%',
+          left: star.left + '%',
+          width: star.size + 'px',
+          height: star.size + 'px',
+          background: star.color,
+          animationDelay: star.animationDelay,
+        }" />
       </div>
-    </main>
+
+      <main class="container">
+        <div class="grid">
+          <TravelerCard v-for="(instrument, index) in instruments" :key="instrument.name_en" :instrument="instrument"
+            :language="language" :volume="volumes[index]" :onToggle="() => toggleInstrument(index)"
+            :onVolumeChange="(vol) => setVolume(index, vol)" />
+        </div>
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup>
 import TravelerCard from './components/TravelerCard.vue'
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import instrumentsData from './assets/instruments.json'
 
-const language = ref('en')
-const loading = ref(true)
+const language = ref('en') // 'en' or 'fr'
 
 const instruments = ref(
   instrumentsData.map((i) => ({
@@ -43,19 +45,79 @@ const instruments = ref(
   }))
 )
 
-// Audio setup
 let audioCtx = null
-const instrumentNodes = new Map() // { name_en => { type: 'buffer', buffer: AudioBuffer } }
-const playingSources = new Map() // { name_en => AudioBufferSourceNode }
+const instrumentBuffers = new Map() // name_en => AudioBuffer
+const sources = new Map() // name_en => AudioBufferSourceNode
+const gains = new Map() // name_en => GainNode
+const volumes = ref(instruments.value.map(() => 100)) // 100% default volume
+const gainNodes = new Map()
 
+const isLoading = ref(true)  // <-- loading flag
+
+// Helper to decode audio data as a Promise
 function decodeAudioDataAsync(ctx, arrayBuffer) {
   return new Promise((resolve, reject) => {
-    ctx.decodeAudioData(
-      arrayBuffer,
-      (decodedData) => resolve(decodedData),
-      (err) => reject(err)
-    )
+    ctx.decodeAudioData(arrayBuffer, resolve, reject)
   })
+}
+
+async function setupAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+
+  // Load and decode all audio files
+  for (const inst of instruments.value) {
+    const res = await fetch(inst.file)
+    const arrayBuffer = await res.arrayBuffer()
+    const decoded = await decodeAudioDataAsync(audioCtx, arrayBuffer)
+    instrumentBuffers.set(inst.name_en, decoded)
+  }
+
+  // Create a source and gain node per instrument, start all muted and looped
+  for (const inst of instruments.value) {
+    const source = audioCtx.createBufferSource()
+    source.buffer = instrumentBuffers.get(inst.name_en)
+    source.loop = true
+
+    const gainNode = audioCtx.createGain()
+    gainNode.gain.value = 0 // start muted
+
+    source.connect(gainNode).connect(audioCtx.destination)
+    source.start(0)
+
+    sources.set(inst.name_en, source)
+    gains.set(inst.name_en, gainNode)
+  }
+}
+
+// Unlock audio on first user interaction
+function ensureAudioStarted() {
+  if (audioCtx && audioCtx.state === 'suspended') {
+    audioCtx.resume()
+  }
+}
+
+const setVolume = (index, vol) => {
+  volumes.value[index] = vol
+
+  const inst = instruments.value[index]
+  const gainNode = gains.get(inst.name_en)
+  if (!gainNode) return
+
+  gainNode.gain.value = (inst.enabled ? vol / 100 : 0)
+}
+
+const toggleInstrument = (index) => {
+  const inst = instruments.value[index]
+  inst.enabled = !inst.enabled
+
+  const gainNode = gains.get(inst.name_en)
+  if (!gainNode) return
+
+  gainNode.gain.value = inst.enabled ? volumes.value[index] / 100 : 0
+}
+
+const toggleLanguage = () => {
+  language.value = language.value === 'en' ? 'fr' : 'en'
 }
 
 function detectBrowserLanguage() {
@@ -64,51 +126,7 @@ function detectBrowserLanguage() {
   return 'en'
 }
 
-// Called on first user interaction to unlock AudioContext
-function ensureAudioStarted() {
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume()
-  }
-}
-
-// Play audio buffer for given instrument (looped)
-function playInstrument(name_en) {
-  if (!instrumentNodes.has(name_en)) return
-
-  stopInstrument(name_en) // stop existing source if any
-
-  const source = audioCtx.createBufferSource()
-  source.buffer = instrumentNodes.get(name_en).buffer
-  source.loop = true
-  source.connect(audioCtx.destination)
-  source.start(0)
-  playingSources.set(name_en, source)
-}
-
-function stopInstrument(name_en) {
-  const source = playingSources.get(name_en)
-  if (source) {
-    source.stop()
-    source.disconnect()
-    playingSources.delete(name_en)
-  }
-}
-
-const toggleInstrument = (index) => {
-  const instrument = instruments.value[index]
-  instrument.enabled = !instrument.enabled
-
-  if (instrument.enabled) {
-    playInstrument(instrument.name_en)
-  } else {
-    stopInstrument(instrument.name_en)
-  }
-}
-
-const toggleLanguage = () => {
-  language.value = language.value === 'en' ? 'fr' : 'en'
-}
-
+// Starry sky background
 const backgroundStars = ref([])
 
 function random(min, max) {
@@ -137,44 +155,33 @@ function generateBackgroundStars() {
 
 onMounted(async () => {
   language.value = detectBrowserLanguage()
+
+  await setupAudio()
+
   generateBackgroundStars()
 
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+  isLoading.value = false // <-- done loading
 
-  try {
-    for (const inst of instruments.value) {
-      const res = await fetch(inst.file)
-      const arrayBuffer = await res.arrayBuffer()
-      const decoded = await decodeAudioDataAsync(audioCtx, arrayBuffer)
-      instrumentNodes.set(inst.name_en, {
-        type: 'buffer',
-        buffer: decoded,
-      })
-    }
-  } catch (e) {
-    console.warn('Audio preloading error:', e)
-  } finally {
-    loading.value = false
+  // Unlock audio on first user interaction (mobile requirement)
+  const unlockAudio = () => {
+    ensureAudioStarted()
+    window.removeEventListener('touchstart', unlockAudio)
+    window.removeEventListener('click', unlockAudio)
   }
-
-  // Unlock AudioContext on first user gesture
-  window.addEventListener('pointerdown', ensureAudioStarted, { once: true })
-  window.addEventListener('touchstart', ensureAudioStarted, { once: true })
-  window.addEventListener('click', ensureAudioStarted, { once: true })
+  window.addEventListener('touchstart', unlockAudio, { once: true })
+  window.addEventListener('click', unlockAudio, { once: true })
 })
 
 onBeforeUnmount(() => {
-  playingSources.forEach((source) => {
-    source.stop()
-    source.disconnect()
+  // Stop all audio sources
+  sources.forEach((source) => {
+    source.stop(0)
   })
-  playingSources.clear()
-  instrumentNodes.clear()
-  if (audioCtx) {
-    audioCtx.close()
-  }
+  audioCtx && audioCtx.close()
 })
 </script>
+
+
 
 <style>
 body {

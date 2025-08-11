@@ -11,6 +11,11 @@
     </div>
     <h2 class="name">{{ displayedName }}</h2>
     <p class="planet">{{ getPlanet(instrument.name_en) }}</p>
+
+    <div class="volume-slider" @click.stop>
+      <!-- <label>Volume: {{ volume }}%</label> -->
+      <input type="range" min="0" max="100" :value="volume" @input="onVolumeInput" />
+    </div>
   </div>
 </template>
 
@@ -24,7 +29,17 @@ const props = defineProps({
     type: String,
     default: 'en',
   },
+  volume: {
+    type: Number,
+    default: 100,
+  },
+  onVolumeChange: Function,
 })
+
+function onVolumeInput(event) {
+  const vol = Number(event.target.value)
+  props.onVolumeChange && props.onVolumeChange(vol)
+}
 
 const imgRef = ref(null)
 const dominantColor = ref(null)
@@ -158,7 +173,7 @@ const activeStyle = computed(() => {
 <style scoped>
 .card {
   width: 180px;
-  height: 260px;
+  height: 270px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
@@ -221,6 +236,17 @@ const activeStyle = computed(() => {
   margin: 0;
   margin-bottom: 10px;
   padding: 0;
+}
+
+.volume-slider {
+  color: #ddd;
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.volume-slider input[type="range"] {
+  width: 100%;
+  margin-top: 5px;
 }
 
 .fade-enter-active,
