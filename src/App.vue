@@ -1,10 +1,14 @@
 <template>
   <div>
-    <button @click="toggleLanguage">
+    <button v-if="!loading" @click="toggleLanguage">
       {{ language === 'en' ? 'EN' : 'FR' }}
     </button>
 
-    <div class="starry-sky">
+    <div v-if="loading" class="loading-screen">
+      <p>Loading audio assets...</p>
+    </div>
+
+    <div v-else class="starry-sky">
       <div v-for="(star, i) in backgroundStars" :key="'bg-star-' + i" class="title-star" :style="{
         top: star.top + '%',
         left: star.left + '%',
@@ -15,7 +19,7 @@
       }" />
     </div>
 
-    <main class="container">
+    <main v-if="!loading" class="container">
       <div class="grid">
         <TravelerCard v-for="(instrument, index) in instruments" :key="instrument.name_en" :instrument="instrument"
           :language="language" :onToggle="() => toggleInstrument(index)" />
@@ -29,7 +33,8 @@ import TravelerCard from './components/TravelerCard.vue'
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 import instrumentsData from './assets/instruments.json'
 
-const language = ref('en') // 'en' or 'fr'
+const language = ref('en')
+const loading = ref(true)
 
 const instruments = ref(
   instrumentsData.map((i) => ({
@@ -38,20 +43,19 @@ const instruments = ref(
   }))
 )
 
-const audioElements = new Map()
+// Audio setup
+let audioCtx = null
+const instrumentNodes = new Map() // { name_en => { type: 'buffer', buffer: AudioBuffer } }
+const playingSources = new Map() // { name_en => AudioBufferSourceNode }
 
-const toggleInstrument = (index) => {
-  const instrument = instruments.value[index]
-  instrument.enabled = !instrument.enabled
-
-  const audio = audioElements.get(instrument.name_en)
-  if (!audio) return
-
-  audio.muted = !instrument.enabled
-}
-
-const toggleLanguage = () => {
-  language.value = language.value === 'en' ? 'fr' : 'en'
+function decodeAudioDataAsync(ctx, arrayBuffer) {
+  return new Promise((resolve, reject) => {
+    ctx.decodeAudioData(
+      arrayBuffer,
+      (decodedData) => resolve(decodedData),
+      (err) => reject(err)
+    )
+  })
 }
 
 function detectBrowserLanguage() {
@@ -60,28 +64,51 @@ function detectBrowserLanguage() {
   return 'en'
 }
 
-onMounted(() => {
-  language.value = detectBrowserLanguage()
+// Called on first user interaction to unlock AudioContext
+function ensureAudioStarted() {
+  if (audioCtx.state === 'suspended') {
+    audioCtx.resume()
+  }
+}
 
-  instruments.value.forEach((instrument) => {
-    const audio = new Audio(`/${instrument.file}`)
-    audio.loop = true
-    audio.volume = 1
-    audio.muted = true
-    audio.play()
-    audioElements.set(instrument.name_en, audio)
-  })
-  generateBackgroundStars()
-})
+// Play audio buffer for given instrument (looped)
+function playInstrument(name_en) {
+  if (!instrumentNodes.has(name_en)) return
 
-onBeforeUnmount(() => {
-  audioElements.forEach((audio) => {
-    audio.pause()
-    audio.src = ''
-  })
-})
+  stopInstrument(name_en) // stop existing source if any
 
-// Fancy background stars
+  const source = audioCtx.createBufferSource()
+  source.buffer = instrumentNodes.get(name_en).buffer
+  source.loop = true
+  source.connect(audioCtx.destination)
+  source.start(0)
+  playingSources.set(name_en, source)
+}
+
+function stopInstrument(name_en) {
+  const source = playingSources.get(name_en)
+  if (source) {
+    source.stop()
+    source.disconnect()
+    playingSources.delete(name_en)
+  }
+}
+
+const toggleInstrument = (index) => {
+  const instrument = instruments.value[index]
+  instrument.enabled = !instrument.enabled
+
+  if (instrument.enabled) {
+    playInstrument(instrument.name_en)
+  } else {
+    stopInstrument(instrument.name_en)
+  }
+}
+
+const toggleLanguage = () => {
+  language.value = language.value === 'en' ? 'fr' : 'en'
+}
+
 const backgroundStars = ref([])
 
 function random(min, max) {
@@ -107,6 +134,46 @@ function generateBackgroundStars() {
     })
   }
 }
+
+onMounted(async () => {
+  language.value = detectBrowserLanguage()
+  generateBackgroundStars()
+
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)()
+
+  try {
+    for (const inst of instruments.value) {
+      const res = await fetch(inst.file)
+      const arrayBuffer = await res.arrayBuffer()
+      const decoded = await decodeAudioDataAsync(audioCtx, arrayBuffer)
+      instrumentNodes.set(inst.name_en, {
+        type: 'buffer',
+        buffer: decoded,
+      })
+    }
+  } catch (e) {
+    console.warn('Audio preloading error:', e)
+  } finally {
+    loading.value = false
+  }
+
+  // Unlock AudioContext on first user gesture
+  window.addEventListener('pointerdown', ensureAudioStarted, { once: true })
+  window.addEventListener('touchstart', ensureAudioStarted, { once: true })
+  window.addEventListener('click', ensureAudioStarted, { once: true })
+})
+
+onBeforeUnmount(() => {
+  playingSources.forEach((source) => {
+    source.stop()
+    source.disconnect()
+  })
+  playingSources.clear()
+  instrumentNodes.clear()
+  if (audioCtx) {
+    audioCtx.close()
+  }
+})
 </script>
 
 <style>
@@ -116,6 +183,16 @@ body {
   background: #000;
   color: #fff;
   overflow-x: hidden;
+}
+
+.loading-screen {
+  height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 1.4rem;
+  color: #aaa;
+  background: #000;
 }
 
 button {
@@ -153,44 +230,6 @@ button:hover {
   margin-top: 80px;
   position: relative;
   z-index: 1;
-}
-
-.card {
-  border: 2px solid #444;
-  border-radius: 8px;
-  padding: 1rem;
-  text-align: center;
-  background: rgba(255, 255, 255, 0.05);
-  cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.card:hover {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.card.active {
-  border-color: #4caf50;
-  background: rgba(76, 175, 80, 0.2);
-}
-
-.name {
-  font-weight: bold;
-  font-size: 1.2rem;
-}
-
-.planet {
-  font-size: 0.9rem;
-  opacity: 0.7;
-}
-
-.planet-image {
-  width: 100%;
-  height: 120px;
-  object-fit: contain;
-  margin-bottom: 0.5rem;
-  user-select: none;
-  pointer-events: none;
 }
 
 /* Starry sky background with flickering colored stars */

@@ -1,11 +1,11 @@
 <template>
   <div class="card" :class="{ active: instrument.enabled }" @click="onToggle" :style="activeStyle">
     <div class="planet-image-wrapper">
-      <img :src="`/${instrument.name_en.toLowerCase()}0.png`" :alt="displayedName" class="planet-image base"
+      <img :src="`./${instrument.name_en.toLowerCase()}0.png`" :alt="displayedName" class="planet-image base"
         crossorigin="anonymous" />
 
       <transition name="fade">
-        <img v-if="instrument.enabled" ref="imgRef" :src="`/${instrument.name_en.toLowerCase()}1.png`"
+        <img v-if="instrument.enabled" ref="imgRef" :src="`./${instrument.name_en.toLowerCase()}1.png`"
           :alt="displayedName" class="planet-image overlay" @load="onImageLoad" crossorigin="anonymous" />
       </transition>
     </div>

@@ -2,36 +2,36 @@
   {
     "name_en": "Gabbro",
     "name_fr": "Gabbro",
-    "file": "gabbro.ogg"
+    "file": "./gabbro.ogg"
   },
   {
     "name_en": "Riebeck",
     "name_fr": "Riébeck",
-    "file": "riebeck.ogg"
+    "file": "./riebeck.ogg"
   },
   {
     "name_en": "Chert",
     "name_fr": "Chail",
-    "file": "chert.ogg"
+    "file": "./chert.ogg"
   },
   {
     "name_en": "Feldspar",
     "name_fr": "Feldspath",
-    "file": "feldspar.ogg"
+    "file": "./feldspar.ogg"
   },
   {
     "name_en": "Esker",
     "name_fr": "Esker",
-    "file": "esker.ogg"
+    "file": "./esker.ogg"
   },
   {
     "name_en": "Solanum",
     "name_fr": "Solanum",
-    "file": "solanum.ogg"
+    "file": "./solanum.ogg"
   },
   {
     "name_en": "Prisoner",
     "name_fr": "Le Prisonnier",
-    "file": "prisoner.ogg"
+    "file": "./prisoner.ogg"
   }
 ]
