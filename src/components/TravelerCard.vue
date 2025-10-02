@@ -52,7 +52,7 @@ function getPlanet(name_en) {
     Feldspar: 'Dark Bramble',
     Esker: 'Attlerock',
     Solanum: 'Quantum Moon',
-    Prisoner: 'The Eye of the Universe',
+    Prisoner: 'The Stranger',
   }
   return map[name_en] || 'Unknown'
 }
